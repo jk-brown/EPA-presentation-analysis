@@ -1,0 +1,73 @@
+---
+title: "Creating New Scoring Criterion"
+author: "Melat Ghebreselassie and Joe Brown"
+date: "2024-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(matilda)
+library(tidyverse)
+```
+## Background
+
+The `matilda` package gives the user the power to create their own criterion to score model runs using `new_criterion`. This function takes data provided by the user and helps to build an object that can be used to weight `hector` runs.
+
+In this example, we will create a criterion object that uses ocean carbon uptake data from the Global Carbon Project. The ocean sink data from GCP is estimated from the average of 10 ocean biogeochemistry models and 7 CO2 flux data products that reproduce the ocean sink since the 1990s. Prior to 1990, the ocean sink estimate is calculated from the multi-model mean of the 10 global ocean biogeochemistry models. More detailed information about the origin of this dat can be found in [Friedlingstein et al. 2023] (https://essd.copernicus.org/articles/15/5301/2023/#section6).
+
+## Importing data 
+We accessed the ocean uptake data from the Global Carbon Project. It needs some editing before it can be used for the criterion.
+```{r, importing and editing ocean carbon data}
+
+# Importing data from local repository
+gcp_data <- read.csv("data/gcp_data.csv")
+
+# Data munging for ocean C in useful year range
+ocean_uptake_data <- gcp_data %>% 
+  select(Year, ocean_sink) %>% # select the year and ocean_sink columns
+  rename(value = ocean_sink, # rename columns if needed 
+         year = Year) %>% 
+  filter(year > 1849) %>% # can filter to include what year range you want. Here I show filtering 1850-present 
+  na.omit()
+
+```
+
+This is how our data looks currently:
+```{r, print head of the data, echo=FALSE}
+head(ocean_uptake_data)
+```
+
+## Create New Criterion
+
+Now we can use this data to create a new scoring criterion to weight `matilda` ensembles.
+
+```{r, creating new criterion}
+
+# Use new_criterion to create new scoring criterion
+criterion_ocean_uptake <- new_criterion(var = OCEAN_UPTAKE(), # name of the variable in the model output used for comparison
+                                        years = ocean_uptake_data$year, # year range of the scoring data
+                                        obs_values = ocean_uptake_data$value # values used for scoring
+                                        ) 
+
+```
+
+This code creates a new object that has an attribute class `criterion` and can be used as a criterion input when scoring `matilda` ensembles.
+
+```{r, printing class information}
+class(criterion_ocean_uptake)
+```
+When we print the object we see the criterion summarized.
+
+```{r, printing criterion name}
+
+print(criterion_ocean_uptake)
+
+```
+
+You are now poised to 
+
+____
