@@ -1,0 +1,183 @@
+---
+title: "Running Matilda Simulation"
+author: "Joe Brown"
+date: "2024-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Goal
+
+The goal of this script is to run `matilda` to create a 10,000 member ensemble for each SSP scenario:
+
+- `SSP1-1.9`
+
+- `SSP1-2.6`
+
+- `SSP2-4.5`
+
+- `SSP3-7.0`
+
+- `SSP5-8.5`
+
+Compare these simulations against FaIR and MAGICC results reported in **Table 7.SM.4** of the [IPCC report] (https://www.ipcc.ch/report/ar6/wg1/downloads/report/IPCC_AR6_WGI_FGD_Chapter07_SM.pdf).
+
+Temperature results will include `global_tas` normalized to 1995-2014 reference period. 
+
+Ensembles will be weighted using `gmst`, `co2 concentrations`, and `ocean carbon uptake`. A goal here is to also adjust scoring influence to determine what gets the `matilda` ensemble closest to the values reported by FaIR and MAGICC.
+
+Metrics will be computed for 3 different periods: `2021:2040`; `2041:2060`; and `2081:2100`.
+
+Attempt to build paralleled `matilda` analysis into a function. 
+
+#### Packages
+
+```{r, load packages}
+library(matilda)
+library(parallel)
+library(tidyverse)
+```
+
+#### Load ini list
+
+```{r, import ini files}
+# locate the ini directory
+ini_dir <- paste0(system.file("input", package = "hector"), "/")
+
+# read in ini files into a list
+ini_list <- list(ssp119 = paste0(ini_dir, "hector_ssp119.ini"),
+                 ssp245 = paste0(ini_dir, "hector_ssp245.ini"),
+                 ssp370 = paste0(ini_dir, "hector_ssp370.ini"),
+                 ssp585 = paste0(ini_dir, "hector_ssp585.ini"))
+```
+
+#### Peturbed parameter set
+
+```{r, build perturbed parameter data frame}
+# Using generate_params() to build the perturbed parameter set
+
+# set seed for replication
+set.seed(123)
+
+# set sample size (we will run with a smallish sample size now)
+n = 10
+
+# initiate a core using the first ini file in ini_list
+params_core <- newcore(ini_list[[1]])
+
+# produce parameter set 
+params <- generate_params(core = params_core,
+                          draws = n)
+```
+
+#### Split jobs for effective parallel
+
+```{r, spliting params data frame into chunks}
+# split params into chunks
+param_chunks <- split(params, 1:5)
+```
+
+#### Run model
+
+```{r, run the model}
+# initializing a cluster
+cl <- makeCluster(detectCores() - 1)
+
+# Export required functions and objects to the cl cluster we just created
+clusterExport(cl, c("param_chunks",
+                    "ini_list",
+                    "newcore",
+                    "iterate_model"))
+
+# run the model with parallel computing
+result <- parLapply(cl, names(ini_list), function(scenario_name){
+  
+  # extract the scenario information from the ini_list 
+  # using the scenario name
+  scenario <- ini_list[[scenario_name]]
+  
+  # initialize model core for the current scenario
+  core <- newcore(scenario, name = scenario_name)
+  
+  # run the model looping across param_chunks for the current core
+  result_list <- lapply(param_chunks, function(chunk) {
+    
+    iterate_model(core = core, 
+                  params = chunk, 
+                  save_years = 1800:2100,
+                  save_vars = c("global_tas", "gmst", "ocean_uptake", "CO2_concentration"))
+  })
+  
+  ## This step ensures a correct run_numbers are added to each model run ##
+  # Starting with the second data frame of the current scenario
+  for (i in 2:length(result_list)) {
+    
+    # calculate the max value of the previous element in the result list
+    max_run_number <- max(result_list[[i - 1]]$run_number)
+    
+    # Add the max value of the previous element to the run_number of the current 
+    # element to get an updated run_number that is continuous from the previous element.
+    result_list[[i]]$run_number <- result_list[[i]]$run_number + max_run_number
+    
+  }
+  
+  # bind 
+  result <- do.call(rbind, result_list)
+  
+  return(result)
+  
+})
+
+#close cluster
+stopCluster(cl)
+
+# bind results to create a data frame
+results_df <- do.call(rbind, result)
+```
+
+#### Score Model Results
+
+```{r, score matilda ensemble}
+# loop through results in model_results to compute model weights for each 
+score_list <- lapply(result, function(df){
+  
+  # use observed temperature to compute model weights
+  score_sensitivity(df, mc_weights_name = "balanced_weight")
+  
+})
+```
+
+#### Normalize result
+
+```{r}
+
+```
+
+#### Compute metrics
+
+```{r}
+metric_list <- list(
+  short = new_metric(var = "global_tas", years = 2021:2040, op = median),
+  mid = new_metric(var = "global_tas", years = 2041:2060, op = median),
+  long = new_metric(var = "global_tas", years = 2081:2100, op = median))
+```
+
+```{r}
+# loop through results and compute metrics for each
+metric_result <- lapply(result, function(df){
+
+  metric_caclulation <- lapply(metric_list, function(metric) {
+  
+  # calculate metrics using the metric we defined in the previous step
+  metric_calc(df, metric)
+
+  })
+  
+  return(metric_caclulation)
+  
+})
+```
+
