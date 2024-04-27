@@ -63,7 +63,7 @@ ini_list <- list(ssp119 = paste0(ini_dir, "hector_ssp119.ini"),
 set.seed(123)
 
 # set sample size (we will run with a smallish sample size now)
-n = 10
+n = 100
 
 # initiate a core using the first ini file in ini_list
 params_core <- newcore(ini_list[[1]])
@@ -145,7 +145,7 @@ results_df <- do.call(rbind, result)
 score_list <- lapply(result, function(df){
   
   # use observed temperature to compute model weights
-  score_sensitivity(df, mc_weights_name = "balanced_weight")
+  score_sensitivity(df, criterion_weights = c(0.5,0,0.5), mc_weights_name = "temp_oc")
   
 })
 ```
@@ -153,7 +153,35 @@ score_list <- lapply(result, function(df){
 #### Normalize result
 
 ```{r}
+warming_data <- lapply(result, function(df){
+  
+  subset(df,
+         variable == "global_tas" 
+         & year > 1849 
+         & year < 2101)
+  })
 
+result_95_to_14 <- lapply(warming_data, function(df){
+  
+  # Filter data for the reference period
+  reference_period <- subset(df,
+                             year >= 1995 &
+                               year <= 2014
+                             )
+  
+  # Calculate the mean values of reference period
+  mean_reference_period <- mean(reference_period$value)
+  
+  # Calculate normalized values for each year in the data set
+  ## subtract data values by reference period mean
+  normalized_values <- df$value - mean_reference_period
+  
+  # adding this column to each df
+  df$value <- normalized_values
+  
+  return(df)
+  
+})
 ```
 
 #### Compute metrics
@@ -167,17 +195,23 @@ metric_list <- list(
 
 ```{r}
 # loop through results and compute metrics for each
-metric_result <- lapply(result, function(df){
+metric_result <- lapply(result_95_to_14, function(df){
 
-  metric_caclulation <- lapply(metric_list, function(metric) {
+  metric_calculation <- lapply(metric_list, function(metric) {
   
   # calculate metrics using the metric we defined in the previous step
   metric_calc(df, metric)
 
   })
   
-  return(metric_caclulation)
+  return(metric_calculation)
   
 })
+```
+
+TO DO: figure out how to apply weights to the values reported....
+
+```{r}
+quantile(metric_result[[1]]$short$metric_result, probs = 0.5)
 ```
 
