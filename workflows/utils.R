@@ -1,4 +1,5 @@
-score_sensitivity <- function(result_df, criterion_weights = NULL, mc_weights_name = "mc_weights"){
+### score sensitivity data frame
+score_sensitivity_df <- function(result_df, criterion_weights = NULL, mc_weights_name = "mc_weights"){
   
   # Scoring with temperature
   scores_temp = score_runs(result_df,
@@ -41,7 +42,7 @@ score_sensitivity <- function(result_df, criterion_weights = NULL, mc_weights_na
 }
 
 
-# Write function to normalize Matilda data to reference period
+### Write function to normalize Matilda data to reference period
 normalize_temperature <- function(data, reference_start_year, reference_end_year) {
   # Filter data for the reference period
   reference_period <- subset(
@@ -66,23 +67,3 @@ normalize_temperature <- function(data, reference_start_year, reference_end_year
   return(normalized_data)
 }
 
-
-## Weighted median test function
-
-weighted_median <- function(values, weights) {
-  
-  # Sort values and weights by values
-  sorted_data <- sort(data.frame(values, weights), by = "values")
-  values <- sorted_data$values
-  weights <- sorted_data$weights
-  
-  # Compute cumulative weights
-  cum_weights <- cumsum(weights)
-  
-  # Find the index where the cumulative weights exceed 0.5
-  median_index <- which.max(cum_weights >= sum(weights) / 2)
-  
-  # Return the corresponding value
-  return(values[median_index])
-
-  }
