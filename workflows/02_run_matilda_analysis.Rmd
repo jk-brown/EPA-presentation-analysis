@@ -63,7 +63,7 @@ ini_list <- list(ssp119 = paste0(ini_dir, "hector_ssp119.ini"),
 set.seed(123)
 
 # set sample size (we will run with a smallish sample size now)
-n = 100
+n = 10000
 
 # initiate a core using the first ini file in ini_list
 params_core <- newcore(ini_list[[1]])
@@ -77,7 +77,7 @@ params <- generate_params(core = params_core,
 
 ```{r, spliting params data frame into chunks}
 # split params into chunks
-param_chunks <- split(params, 1:5)
+param_chunks <- split(params, 1:100)
 ```
 
 #### Run model
@@ -142,13 +142,51 @@ results_df <- do.call(rbind, result)
 
 ```{r, score matilda ensemble}
 # loop through results in model_results to compute model weights for each 
-score_list <- lapply(result, function(df){
+scored_result_list <- lapply(result, function(df){
   
   # use observed temperature to compute model weights
   score_sensitivity(df, criterion_weights = c(0.5,0,0.5), mc_weights_name = "temp_oc")
   
 })
 ```
+
+```{r}
+weights_list <- lapply(result, function(result_df){  
+
+  # Scoring with temperature
+  scores_temp = score_runs(result_df,
+                           criterion_gmst_obs(),
+                           score_bayesian)
+  
+  # Scoring with co2 
+  scores_co2 = score_runs(result_df,
+                          criterion_co2_obs(), 
+                          score_bayesian)
+  
+  # Scoring with ocean_c_uptake
+  scores_ocean_c = score_runs(result_df,
+                              criterion_ocean_uptake,
+                              score_bayesian)
+  
+  # creating score_list
+  score_list = list(scores_temp, scores_co2, scores_ocean_c)
+  
+  # multi-criterion weights
+  mc_weights = multi_criteria_weighting(score_list)
+  
+  # data frame of weights
+  weights_df = data.frame(run_number = scores_temp$run_number,
+                          temp_weights = scores_temp$weights,
+                          co2_weights = scores_co2$weights,
+                          ocean_uptake_weights = scores_ocean_c$weights,
+                          mc_weights = mc_weights$mc_weight)
+  
+  # return the mc_weights
+  return(weights_df)
+  
+})
+```
+
 
 #### Normalize result
 
@@ -209,9 +247,52 @@ metric_result <- lapply(result_95_to_14, function(df){
 })
 ```
 
+```{r}
+weighted_metrics <- Map(function(list_of_dfs, weights_df) {
+  
+  lapply(list_of_dfs, function(df) cbind(df, weights_df))
+  
+  }, 
+
+metric_result, weights_list)
+```
+
+
 TO DO: figure out how to apply weights to the values reported....
 
 ```{r}
-quantile(metric_result[[1]]$short$metric_result, probs = 0.5)
+weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.5, w = weighted_metrics[[1]]$short$mc_weights)
+```
+```{r}
+weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.05, w = weighted_metrics[[1]]$short$mc_weights)
+```
+
+```{r}
+weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.95, w = weighted_metrics[[1]]$short$mc_weights)
+```
+
+```{r}
+compute_weighted_quantile <- function(data, weight_type, probs) {
+  # Check if the weight type is valid
+  if (!(weight_type %in% colnames(data))) {
+    stop("Invalid weight type. Please provide a valid column name.")
+  }
+  
+  # Sort the data by metric_result
+  sorted_data <- data[order(data$metric_result), ]
+  
+  # Compute cumulative weights
+  cum_weights <- cumsum(sorted_data[[weight_type]])
+  
+  # Find the index where the cumulative weights exceed the desired quantile
+  quantile_index <- which.max(cum_weights >= probs * sum(sorted_data[[weight_type]]))
+  
+  # Return the metric result at the found index
+  return(sorted_data$metric_result[quantile_index])
+}
+```
+
+```{r}
+compute_weighted_quantile(weighted_metrics[[1]]$short, weight_type = "ocean_uptake_weights", probs = 0.95)
 ```
 

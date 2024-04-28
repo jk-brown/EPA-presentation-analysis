@@ -68,6 +68,6 @@ print(criterion_ocean_uptake)
 
 ```
 
-You are now poised to 
+You are now poised to use this criterion to weight a `metilda` ensemble.
 
 ____
