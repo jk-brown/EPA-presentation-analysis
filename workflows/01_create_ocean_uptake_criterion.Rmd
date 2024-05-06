@@ -71,3 +71,50 @@ print(criterion_ocean_uptake)
 You are now poised to use this criterion to weight a `metilda` ensemble.
 
 ____
+
+New temperature criterion:
+```{r}
+temp_data <- read.csv("data/temp_anomaly_annmean_hadcrut5.csv", stringsAsFactors = F)
+
+temp_criterion_dat <- temp_data %>% 
+  select(year, anomaly) %>% 
+  rename(value = anomaly) %>% 
+  filter(year > 1879) %>% 
+  normalize_temperature(1961, 1990)
+
+
+head(temp_criterion_dat)
+
+```
+
+```{r}
+# Use new_criterion to create new scoring criterion
+criterion_temp <- new_criterion(var = GMST(),# name of the variable in the model output used for comparison
+                                years = temp_criterion_dat$year,
+                                # year range of the scoring data
+                                obs_values = temp_criterion_dat$adjusted_value) # values used for scoring
+
+```
+
+
+New CO2 criterion
+```{r}
+co2_data <- read.csv("data/historical_co2.csv", stringsAsFactors = F)
+
+co2_criterion_data <- co2_data %>% 
+  select(v.YEARS.GAS.., CO2) %>% 
+  rename(year = v.YEARS.GAS..,
+         value = CO2) %>% 
+  filter(year > 1849)
+
+head(co2_criterion_data)
+```
+
+```{r}
+# Use new_criterion to create new scoring criterion
+criterion_co2 <- new_criterion(var = CONCENTRATIONS_CO2(),# name of the variable in the model output used for comparison
+                                years = co2_criterion_data$year,
+                                # year range of the scoring data
+                                obs_values = co2_criterion_data$value) # values used for scoring
+```
+

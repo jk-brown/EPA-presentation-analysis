@@ -134,6 +134,12 @@ result <- parLapply(cl, names(ini_list), function(scenario_name){
 #close cluster
 stopCluster(cl)
 
+# apply scenario names to list elements
+names(result) <- c("SSP1-1.9", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
+
+# save data 
+saveRDS(result, "data/result-10k-run.RDS")
+
 # bind results to create a data frame
 results_df <- do.call(rbind, result)
 ```
@@ -150,23 +156,51 @@ scored_result_list <- lapply(result, function(df){
 })
 ```
 
+score temp test 
+```{r}
+
+# score_temp <- lapply(result, function(df) {
+#   
+#   scores = score_runs(df,
+#                       criterion_gmst_obs(),
+#                       score_function = score_ramp, 
+#                       w1 = 0, 
+#                       w2 = 1.0)
+#   
+#   scores <- na.omit(scores)
+#   
+#   return(scores)
+# })
+# 
+# # Identify rows with NAs
+# rows_with_na <- !complete.cases(result[[1]])
+# 
+# # Show the row numbers with NAs
+# result[[1]]$rows_with_na <- rows_with_na
+# result[[1]][result[[1]]$rows_with_na, ]
+```
+
 ```{r}
 weights_list <- lapply(result, function(result_df){  
 
   # Scoring with temperature
   scores_temp = score_runs(result_df,
-                           criterion_gmst_obs(),
+                           criterion_temp,
                            score_bayesian)
+  scores_temp = na.omit(scores_temp)
+  
   
   # Scoring with co2 
   scores_co2 = score_runs(result_df,
-                          criterion_co2_obs(), 
+                          criterion_co2, 
                           score_bayesian)
+  scores_co2 = na.omit(scores_co2)
   
   # Scoring with ocean_c_uptake
   scores_ocean_c = score_runs(result_df,
                               criterion_ocean_uptake,
                               score_bayesian)
+  scores_ocean_c = na.omit(scores_ocean_c)
   
   # creating score_list
   score_list = list(scores_temp, scores_co2, scores_ocean_c)
@@ -193,18 +227,22 @@ weights_list <- lapply(result, function(result_df){
 ```{r}
 warming_data <- lapply(result, function(df){
   
+  df <- na.omit(df)
+  
   subset(df,
          variable == "global_tas" 
          & year > 1849 
          & year < 2101)
+  
+  
   })
 
 result_95_to_14 <- lapply(warming_data, function(df){
   
   # Filter data for the reference period
   reference_period <- subset(df,
-                             year >= 1995 &
-                               year <= 2014
+                             year > 1994 &
+                               year < 2015
                              )
   
   # Calculate the mean values of reference period
@@ -233,66 +271,204 @@ metric_list <- list(
 
 ```{r}
 # loop through results and compute metrics for each
-metric_result <- lapply(result_95_to_14, function(df){
+metric_result <- lapply(names(result_95_to_14), function(df_name){
 
-  metric_calculation <- lapply(metric_list, function(metric) {
+  df <- result_95_to_14[[df_name]]
   
+  metric_calculation <- lapply(names(metric_list), function(metric_name) {
+  
+  # metric criterion
+  metric_criterion <- metric_list[[metric_name]] 
+    
   # calculate metrics using the metric we defined in the previous step
-  metric_calc(df, metric)
+  metric_values = metric_calc(df, metric_criterion)
 
+  # Add column of the data frame names
+  metric_values$scenario = as.factor(df_name)
+  
+  # Add column of metric_criterion names
+  metric_values$metric_criterion = as.factor(metric_name)
+  
+  return(metric_values)
+  
   })
   
-  return(metric_calculation)
+  metric_result <- do.call(rbind, metric_calculation)
+  
+  return(metric_result)
   
 })
 ```
 
 ```{r}
-weighted_metrics <- Map(function(list_of_dfs, weights_df) {
-  
-  lapply(list_of_dfs, function(df) cbind(df, weights_df))
-  
-  }, 
+weighted_metrics <- Map(merge, metric_result, weights_list, by = "run_number")
+weighted_metrics_df <- do.call(rbind, weighted_metrics)
+params$run_number <- 1:nrow(params)
 
-metric_result, weights_list)
+# filtering out zeroed rows
+# weighted_metrics_df <- weighted_metrics_df[weighted_metrics_df$temp_weights > 1.0e-6, ]
+# weighted_metrics_df <- weighted_metrics_df[weighted_metrics_df$co2_weights > 1.0e-6, ]
+# weighted_metrics_df <- weighted_metrics_df[weighted_metrics_df$ocean_uptake_weights > 1.0e-6, ]
+# weighted_metrics_df <- weighted_metrics_df[weighted_metrics_df$mc_weights > 1.0e-6, ]
+# test <- subset(test, 
+#                ECS > 2 &
+#                 ECS < 5)
+metric_params_weights <- merge(weighted_metrics_df, params, by = "run_number")
+
+
 ```
-
 
 TO DO: figure out how to apply weights to the values reported....
 
 ```{r}
-weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.5, w = weighted_metrics[[1]]$short$mc_weights)
+# multi-criterion 
+metric_summary_mc <- metric_params_weights %>%
+  subset(mc_weights > 1.0e-06) %>% 
+  group_by(scenario, metric_criterion) %>%
+  summarize("lower_ci" = weighted.quantile(metric_result,
+                                           w = mc_weights,
+                                           probs = 0.05),
+            "median" = weighted.quantile(metric_result,
+                                         w = mc_weights,
+                                         probs = 0.5),
+            "upper_ci" = weighted.quantile(metric_result,
+                                           w = mc_weights,
+                                           probs = 0.95)) %>%
+  ungroup() %>% 
+  mutate(metric_criterion = case_when(metric_criterion == "short" ~ "2021-2040",
+                                      metric_criterion == "mid" ~ "2041-2060",
+                                      metric_criterion == "long" ~ "2081-2100"),
+         name = "Matilda v1.0: Multi-Criteria")
+
+# temperature weighted
+metric_summary_temp <- metric_params_weights %>%
+  subset(temp_weights > 1.0e-06) %>%
+  group_by(scenario, metric_criterion) %>%
+  summarize("lower_ci" = weighted.quantile(metric_result,
+                                           w = temp_weights,
+                                           probs = 0.05),
+            "median" = weighted.quantile(metric_result,
+                                         w = temp_weights,
+                                         probs = 0.5),
+            "upper_ci" = weighted.quantile(metric_result,
+                                           w = temp_weights,
+                                           probs = 0.95)) %>%
+  ungroup() %>% 
+  mutate(metric_criterion = case_when(metric_criterion == "short" ~ "2021-2040",
+                                      metric_criterion == "mid" ~ "2041-2060",
+                                      metric_criterion == "long" ~ "2081-2100"),
+         name = "Matilda v1.0: Temperature")
+
+# CO2 weighted
+metric_summary_co2 <- metric_params_weights %>%
+  subset(co2_weights > 1.0e-06) %>%
+  group_by(scenario, metric_criterion) %>%
+  summarize("lower_ci" = weighted.quantile(metric_result,
+                                           w = co2_weights,
+                                           probs = 0.05),
+            "median" = weighted.quantile(metric_result,
+                                         w = co2_weights,
+                                         probs = 0.5),
+            "upper_ci" = weighted.quantile(metric_result,
+                                           w = co2_weights,
+                                           probs = 0.95)) %>%
+  ungroup() %>% 
+  mutate(metric_criterion = case_when(metric_criterion == "short" ~ "2021-2040",
+                                      metric_criterion == "mid" ~ "2041-2060",
+                                      metric_criterion == "long" ~ "2081-2100"),
+         name = "Matilda v1.0: CO2 Concentration")
+
+# Ocean uptake weighted
+metric_summary_ocean_uptake <- metric_params_weights %>%
+  subset(ocean_uptake_weights > 1.0e-06) %>%
+  group_by(scenario, metric_criterion) %>%
+  summarize("lower_ci" = weighted.quantile(metric_result,
+                                           w = ocean_uptake_weights,
+                                           probs = 0.05),
+            "median" = weighted.quantile(metric_result,
+                                         w = ocean_uptake_weights,
+                                         probs = 0.5),
+            "upper_ci" = weighted.quantile(metric_result,
+                                           w = ocean_uptake_weights,
+                                           probs = 0.95)) %>%
+  ungroup() %>% 
+  mutate(metric_criterion = case_when(metric_criterion == "short" ~ "2021-2040",
+                                      metric_criterion == "mid" ~ "2041-2060",
+                                      metric_criterion == "long" ~ "2081-2100"),
+         name = "Matilda v1.0: Ocean Uptake")
+
+# IPCC data 
+IPCC_data <- data.frame(
+  scenario = as.factor(rep(c("SSP1-1.9", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5"), each = 1, times = 3)),
+  metric_criterion = as.factor(rep(c("2021-2040", "2041-2060", "2081-2100"), each = 4)),
+  lower_ci = c(0.38, 0.44, 0.45, 0.51, 0.40, 0.78, 0.92, 1.08, 0.24, 1.24, 2.00, 2.44,
+               0.39, 0.47, 0.51, 0.56, 0.36, 0.79, 0.98, 1.12, 0.18, 1.21, 2.07, 2.58,
+               0.39, 0.45, 0.49, 0.55, 0.39, 0.79, 0.98, 1.11, 0.20, 1.21, 2.13, 2.63),
+  median = c(0.61, 0.66, 0.67, 0.76, 0.71, 1.12, 1.28, 1.54, 0.56, 1.81, 2.76, 3.50,
+             0.61, 0.65, 0.68, 0.77, 0.66, 1.11, 1.28, 1.55, 0.48, 1.75, 2.72, 3.50,
+             0.61, 0.64, 0.68, 0.77, 0.71, 1.13, 1.33, 1.57, 0.52, 1.82, 2.86, 3.65),
+  upper_ci = c(0.85, 0.90, 0.92, 1.04, 1.07, 1.57, 1.75, 2.08, 0.96, 2.59, 3.75, 4.82,
+               0.94, 0.92, 0.91, 1.08, 1.14, 1.59, 1.72, 2.17, 1.00, 2.63, 3.72, 4.89,
+               0.88, 0.89, 0.92, 1.06, 1.15, 1.60, 1.77, 2.16, 0.99, 2.67, 3.97, 5.16),
+  name = rep(c("WG1 Assessed Range", "FaIR v1.6.2", "MAGICC7"), each = 12))
+
+
+metric_summary_plotting <- rbind(metric_summary_mc, 
+                                 metric_summary_temp, 
+                                 metric_summary_co2, 
+                                 metric_summary_ocean_uptake, 
+                                 IPCC_data)
+
 ```
+
+
 ```{r}
-weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.05, w = weighted_metrics[[1]]$short$mc_weights)
+write.csv(metric_summary, "data/metric_summary_data_5.2.24.csv")
 ```
 
 ```{r}
-weighted.quantile(weighted_metrics[[1]]$short$metric_result, probs = 0.95, w = weighted_metrics[[1]]$short$mc_weights)
+library(ggplot2)
+
+name_order <- c("WG1 Assessed Range", "FaIR v1.6.2", "MAGICC7", "Matilda v1.0: Multi-Criteria", "Matilda v1.0: Temperature", "Matilda v1.0: CO2 Concentration", "Matilda v1.0: Ocean Uptake")
+
+# Reorder levels of 'name' variable in the dataset
+metric_summary_plotting$name <- factor(metric_summary_plotting$name, levels = name_order)
+
+ggplot() +
+  geom_point(data = metric_summary_plotting, 
+             aes(x = metric_criterion, 
+                 y = median, 
+                 color = factor(name, levels = name_order),
+                 group = interaction(metric_criterion, name)),
+             position = position_dodge(width = 0.9), 
+             size = 4) +  # Points for median
+  geom_errorbar(data = metric_summary_plotting,
+                aes(x = metric_criterion, 
+                    ymin = lower_ci, 
+                    ymax = upper_ci,
+                    color = factor(name, levels = name_order),
+                    group = interaction(metric_criterion, name)),
+                position = position_dodge(width = 0.9), 
+                width = 0.3, linewidth = 0.5) +  
+  scale_color_manual(values = c("#000000", "#6FB2C1", "#91BAB6","#E79805", "#EC7A05", "#EF5703", "#F11B00")) +
+  labs(x = "Assessed Year Range", y = "Future warming (GSAT) relative to 1995-2014", color = "") +
+  theme_light(base_size = 18) +
+  facet_wrap(~scenario)  # Rotate x-axis labels for better readability
+
+ggsave("figures/gsat_comparison_balanced.png",
+       height = 7,
+       width = 14,
+       units = "in", 
+       device = "png",
+       dpi = 300)
 ```
 
-```{r}
-compute_weighted_quantile <- function(data, weight_type, probs) {
-  # Check if the weight type is valid
-  if (!(weight_type %in% colnames(data))) {
-    stop("Invalid weight type. Please provide a valid column name.")
-  }
-  
-  # Sort the data by metric_result
-  sorted_data <- data[order(data$metric_result), ]
-  
-  # Compute cumulative weights
-  cum_weights <- cumsum(sorted_data[[weight_type]])
-  
-  # Find the index where the cumulative weights exceed the desired quantile
-  quantile_index <- which.max(cum_weights >= probs * sum(sorted_data[[weight_type]]))
-  
-  # Return the metric result at the found index
-  return(sorted_data$metric_result[quantile_index])
-}
-```
 
+#### Filtering params
+
+
+First merge weights with parameter sets 
 ```{r}
-compute_weighted_quantile(weighted_metrics[[1]]$short, weight_type = "ocean_uptake_weights", probs = 0.95)
+
 ```
 
