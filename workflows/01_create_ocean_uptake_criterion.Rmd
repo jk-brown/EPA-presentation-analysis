@@ -118,3 +118,11 @@ criterion_co2 <- new_criterion(var = CONCENTRATIONS_CO2(),# name of the variable
                                 obs_values = co2_criterion_data$value) # values used for scoring
 ```
 
+
+## likelihood test
+```{r}
+result_matrix <- matilda::hector_matrix(result[[1]])
+
+score_bayesian <- score_bayesian(result_matrix)
+```
+
