@@ -1,0 +1,67 @@
+---
+title: "Default_matilda_param_set"
+author: "Joe Brown"
+date: "2024-07-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Producing parameter values
+
+```{r}
+library(matilda)
+```
+
+
+## Identifying ECS distribution close to ECS distribution
+```{r}
+# sample size and seed number
+n = 5000
+set.seed(1001)
+
+# intial gamma distribution parameters
+shape <- 67.65
+scale <- 0.0465
+
+# generate sample
+ecs_sample <- data.frame(ECS = rgamma(n, 
+                                      shape = shape, 
+                                      scale = scale))
+
+# print values
+quantile (ecs_sample$ECS, probs = c(0.05, 0.5, 0.95))
+```
+## Producing parameter sample
+```{r}
+# Using generate_params() to build the perturbed parameter set
+
+# set seed for replication
+set.seed(1001)
+
+# set sample size (we will run with a smallish sample size now)
+n = 10000
+
+# initiate a core using the first ini file in ini_list
+params_core <- newcore(ini_list[[1]])
+
+# produce parameter set 
+params <- generate_params(core = params_core,
+                          draws = n)
+```
+
+Substitute out the ECS values produced from the random sample with those that were produced by optimum distribution fitting.
+
+```{r}
+params[6] <- data
+```
+
+```{r}
+ggplot() +
+  geom_point(data = params,
+             aes(x = ECS, 
+                 y = AERO_SCALE))
+```
+
