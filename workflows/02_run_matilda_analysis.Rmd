@@ -35,7 +35,7 @@ Attempt to build paralleled `matilda` analysis into a function.
 
 #### Packages
 
-```{r, load packages}
+```{r, load packages, message=FALSE}
 library(matilda)
 library(parallel)
 library(tidyverse)
@@ -64,7 +64,7 @@ ini_list <- list(ssp119 = paste0(ini_dir, "hector_ssp119.ini"),
 set.seed(123)
 
 # set sample size (we will run with a smallish sample size now)
-n = 100
+n = 5000
 
 # initiate a core using the first ini file in ini_list
 params_core <- newcore(ini_list[[1]])
@@ -191,10 +191,10 @@ ensemble_gmst_rmse <- lapply(result, function(df) {
   gmst_rmse <- rmse_values(df, criterion_gmst_obs(), sigma = 1)
   
   # subset the result for gmst rmse < 0.18
-  gmst_rmse_subset <- subset(gmst_rmse, rmse_value < 0.4)
+  #gmst_rmse_subset <- subset(gmst_rmse, rmse_value < 0.4)
   
   # return gmst_rmse 
-  return(gmst_rmse_subset)
+  return(gmst_rmse)
 })
 
 # merge rmse subset with result to get constrained result

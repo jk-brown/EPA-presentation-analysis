@@ -20,6 +20,11 @@ sample_one_parameter <- function(param, current_params_weights) {
     stop(paste("No data found for parameter", param))
   }
   
+  # Check if weights sum to one
+  if (sum(param_pdf$weight) != 1){
+    stop(paste("Parameter weights do not sum to 1."))
+  }
+  
   # Sample the current parameter
   sampled_value <- sample(param_pdf[[param]], size = 1, prob = param_pdf$weight, replace = TRUE)
   
@@ -54,6 +59,9 @@ sample_parameters <- function(params_weights, param_names, n_samples) {
 # Parameters names
 param_names <- c("BETA", "Q10_RH", "NPP_FLUX0", "AERO_SCALE", "DIFFUSIVITY", "ECS")
 
+# sample size 
+n_samples <- 1000
+
 # Example params_weights data frame (to be replaced with your actual data)
 # params_weights <- data.frame(
 #   BETA = runif(100),
@@ -75,7 +83,7 @@ head(sampled_params)
 ################
 
 # split params into chunks
-param_chunks <- split(sampled_params, 1:50)
+param_chunks <- split(sampled_params, 1:100)
 
 # initializing a cluster
 cl <- makeCluster(detectCores() - 1)
@@ -87,7 +95,7 @@ clusterExport(cl, c("param_chunks",
                     "iterate_model"))
 
 # run the model with parallel computing
-result <- parLapply(cl, names(ini_list), function(scenario_name){
+new_sample_result <- parLapply(cl, names(ini_list), function(scenario_name){
   
   # extract the scenario information from the ini_list 
   # using the scenario name
@@ -129,13 +137,57 @@ result <- parLapply(cl, names(ini_list), function(scenario_name){
 stopCluster(cl)
 
 # apply scenario names to list elements
-names(result) <- c("SSP1-1.9", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
+names(new_sample_result) <- c("SSP1-1.9", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
 
 # save data 
 #saveRDS(result, "data/result-10k-run.RDS")
 
+# normalize warming values to reference period
+new_warming_data <- lapply(new_sample_result, function(df){
+  
+  subset(df,
+         variable == "global_tas" 
+         & year > 1849 
+         & year < 2101)
+  
+})
+
+new_result_95_to_14 <- lapply(new_warming_data, function(df){
+  
+  # Filter data for the reference period
+  reference_period <- subset(df,
+                             year > 1994 &
+                               year < 2015
+  )
+  
+  # Calculate the mean values of reference period
+  mean_reference_period <- mean(reference_period$value)
+  
+  # Calculate normalized values for each year in the data set
+  ## subtract data values by reference period mean
+  normalized_values <- df$value - mean_reference_period
+  
+  # adding this column to each df
+  df$value <- normalized_values
+  
+  return(df)
+  
+})
+
+
 # bind results to create a data frame
-results_df <- do.call(rbind, result)
+new_sample_result_df <- do.call(rbind, new_result_95_to_14)
+new_sample_result_df$weight <- NA
+row.names(new_sample_result_df) <- NULL
 
 
 ## compare plots 
+library(ggplot2)
+
+# original result
+ggplot(data = new_sample_result_df)) +
+  geom_line(
+    aes(x = year, 
+        y = value, 
+        group = run_number)) +
+  facet_wrap(~scenario, scales = "free_y")
