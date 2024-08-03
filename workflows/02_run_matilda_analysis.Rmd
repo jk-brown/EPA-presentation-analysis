@@ -64,7 +64,7 @@ ini_list <- list(ssp119 = paste0(ini_dir, "hector_ssp119.ini"),
 set.seed(123)
 
 # set sample size (we will run with a smallish sample size now)
-n = 5000
+n = 500
 
 # initiate a core using the first ini file in ini_list
 params_core <- newcore(ini_list[[1]])
@@ -139,7 +139,7 @@ stopCluster(cl)
 names(result) <- c("SSP1-1.9", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
 
 # save data 
-#saveRDS(result, "data/result-10k-run.RDS")
+saveRDS(result, "data/result-10k-run.RDS")
 
 # bind results to create a data frame
 results_df <- do.call(rbind, result)
@@ -152,7 +152,7 @@ results_df <- do.call(rbind, result)
 scored_result_list <- lapply(result, function(df){
   
   # use observed temperature to compute model weights
-  score_sensitivity(df, criterion_weights = c(0.5,0,0.5), mc_weights_name = "temp_oc")
+  score_sensitivity_df(df)
   
 })
 ```
@@ -242,6 +242,15 @@ weights_list <- lapply(result_rmse_filtered, function(result_df){
   return(weights_df)
   
 })
+
+weights_df <- do.call(rbind, weights_list)
+row.names(weights_df) <- NULL
+
+
+#### TEST ####
+weights_for_merge <- data.frame(weights = weights_list$`SSP1-1.9`$mc_weights)
+weighted_params <- params
+weighted_params$prob_weight <- weights_for_merge
 ```
 
 
